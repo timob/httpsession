@@ -4,6 +4,6 @@ Go HTTP session library
 
 Documentation
 -------------
-http://godoc.org/timob/httpsession
+http://godoc.org/github.com/timob/httpsession
 
 
