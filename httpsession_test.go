@@ -25,7 +25,7 @@ func TestSessionCookie(t *testing.T) {
 		t.Fatal(err)
 	}
 	session.Values["hello"] = "world"
-	err = sessionDB.SaveSession(session, token)
+	err = session.Save()
 	t.Logf("recorder %v", recorder)
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func TestSessionCookie(t *testing.T) {
 	if !ok || v.(string) != "world" {
 		t.Fatal("expecting session map to be set")
 	}
-	err = sessionDB.SaveSession(session, token)
+	err = session.Save()
 	t.Logf("recorder %v", recorder)
 	if err != nil {
 		t.Fatal(err)

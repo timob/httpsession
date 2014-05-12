@@ -1,7 +1,7 @@
 package sessioncookie
 
 import (
-	. "github.com/timob/httpsession/token"
+	"github.com/timob/httpsession/token"
 	"net/http"
 )
 
@@ -11,7 +11,7 @@ type SessionCookie struct {
 	Req  *http.Request
 }
 
-func (c *SessionCookie) GetTokenData() (*TokenData, error) {
+func (c *SessionCookie) GetTokenData() (*token.TokenData, error) {
 	idCookie, err := c.Req.Cookie(c.Name + "_id")
 	if err == http.ErrNoCookie {
 		return nil, nil
@@ -25,10 +25,10 @@ func (c *SessionCookie) GetTokenData() (*TokenData, error) {
 		return nil, err
 	}
 
-	return &TokenData{idCookie.Value, tokenCookie.Value}, nil
+	return &token.TokenData{idCookie.Value, tokenCookie.Value}, nil
 }
 
-func (c *SessionCookie) SetTokenData(t *TokenData) error {
+func (c *SessionCookie) SetTokenData(t *token.TokenData) error {
 	http.SetCookie(
 		c.Resp,
 		&http.Cookie{
@@ -52,4 +52,15 @@ func (c *SessionCookie) SetTokenData(t *TokenData) error {
 		},
 	)
 	return nil
+}
+
+type Server struct {
+	CookieName string
+}
+
+func (s *Server) Handle(h token.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := &SessionCookie{s.CookieName, w, r}
+		h.ServeHTTP(w, r, token)
+	}
 }

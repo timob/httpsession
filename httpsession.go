@@ -9,29 +9,33 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
-	. "github.com/timob/httpsession/store"
-	. "github.com/timob/httpsession/token"
+	"github.com/timob/httpsession/store"
+	"github.com/timob/httpsession/token"
 	"time"
 )
 
-// Session store has methods for accessing sessions.
+// SessionDB is a database of sessions
 type SessionDB struct {
-	SessionStore
+	store.SessionStore
 	SessionTimeout time.Duration // maximum time between requests in session
 	TokenTimeout   time.Duration // timeout after which subsequent requests will receive new token
 }
 
 // Session can be used to get/set values for the session
 type Session struct {
-	Values       map[string]interface{}
-	id           *sessionId
-	readEntry    *SessionEntry
-	SecondaryKey *string // if not nil, store can use this as a second lookup key
+	Values          map[string]interface{}
+	id              *sessionId
+	readEntry       *store.SessionEntry
+	SecondaryKey    *string // if not nil, store can use this as a second lookup key
+	sessionDB       *SessionDB
+	token           token.SessionToken
+	tokenHasBeenSet bool
 }
 
 type sessionId struct {
 	EntryId      string
 	tokenCounter int
+	secret       string
 }
 
 var DefaultSessionTimeout time.Duration = time.Minute * 10
@@ -41,15 +45,39 @@ var DefaultTokenTimeout time.Duration = DefaultSessionTimeout
 // It is to allow for first reply(s) after token change to be lost.
 var retryTimeout time.Duration = time.Minute * 1
 
-func newSession() *Session {
-	return &Session{make(map[string]interface{}), nil, nil, nil}
+func newSession(s *SessionDB, t token.SessionToken) (*Session, error) {
+	entryIdBytes, err := generateRand(token.EntryIdLength)
+	if err != nil {
+		return nil, err
+	}
+	secretBytes, err := generateRand(token.EntryIdLength)
+	if err != nil {
+		return nil, err
+	}
+	id := &sessionId{
+		base64.URLEncoding.EncodeToString(entryIdBytes),
+		0,
+		base64.URLEncoding.EncodeToString(secretBytes),
+	}
+
+	return &Session{make(map[string]interface{}), id, nil, nil, s, t, false}, nil
 }
 
-// GetSession returns a the session specified by token in t. If t is empty or
-// session has expired or token is incorrect returns new session.
-func (s *SessionDB) GetSession(t SessionToken) (*Session, error) {
+// Set token data to identify this session. (SetToken() is called automatically
+// by Save() if not called elsewhere.)
+func (s *Session) SetToken() error {
+	tokenStr := base64.URLEncoding.EncodeToString(sha256Sum(
+		fmt.Sprintf("%s%d", s.id.secret, s.id.tokenCounter),
+	))
+	return s.token.SetTokenData(&token.TokenData{s.id.EntryId, tokenStr})
+}
+
+// GetSession returns the session specified by token t. If t is a new token or
+// a session has expired or the token is incorrect, GetSession() returns a new
+// session.
+func (s *SessionDB) GetSession(t token.SessionToken) (*Session, error) {
 	if t == nil {
-		return nil, errors.New("SessionStore.GetSession: SessionTokenContainer is nil")
+		return nil, errors.New("SessionStore.GetSession: token.SessionTokenContainer is nil")
 	}
 
 	token, err := t.GetTokenData()
@@ -57,7 +85,7 @@ func (s *SessionDB) GetSession(t SessionToken) (*Session, error) {
 		return nil, err
 	}
 	if token == nil {
-		return newSession(), nil
+		return newSession(s, t)
 	}
 	if err = token.Valid(); err != nil {
 		return nil, err
@@ -68,16 +96,16 @@ func (s *SessionDB) GetSession(t SessionToken) (*Session, error) {
 		return nil, err
 	}
 	if entry == nil {
-		return newSession(), nil
+		return newSession(s, t)
 	}
 
 	if time.Now().After(entry.SessionExpiry) {
-		return newSession(), nil
+		return newSession(s, t)
 	}
 
 	if token.Token != entry.CorrectToken() {
 		if !(entry.IsCorrectPreviousToken(token.Token) && time.Now().Before(entry.TokenStart.Add(retryTimeout))) {
-			return newSession(), nil
+			return newSession(s, t)
 		}
 	}
 
@@ -92,64 +120,51 @@ func (s *SessionDB) GetSession(t SessionToken) (*Session, error) {
 		return nil, err
 	}
 
-	return &Session{vals, &sessionId{token.EntryId, currentTokenCounter}, entry, entry.SecondaryKey}, nil
+	return &Session{
+		vals,
+		&sessionId{token.EntryId, currentTokenCounter, entry.Secret},
+		entry,
+		entry.SecondaryKey,
+		s,
+		t,
+		false,
+	}, nil
 }
 
-// Save session, store resulting token in t
-func (s *SessionDB) SaveSession(session *Session, t SessionToken) error {
-	if session == nil {
-		return errors.New("SessionStore.Save: session is nil")
-	}
-
+// Save the session. (Calls SetToken() if it has not already been called.)
+func (s *Session) Save() error {
 	buf := new(bytes.Buffer)
 	enc := gob.NewEncoder(buf)
-	err := enc.Encode(session.Values)
+	err := enc.Encode(s.Values)
 	if err != nil {
 		return err
 	}
 
-	var id *sessionId
 	var tokenStart time.Time
-	var secret string
-	if session.id == nil {
-		entryIdBytes, err := generateRand(EntryIdLength)
-		if err != nil {
-			return err
-		}
-		id = &sessionId{base64.URLEncoding.EncodeToString(entryIdBytes), 0}
-		secretBytes, err := generateRand(EntryIdLength)
-		if err != nil {
-			return err
-		}
-		secret = base64.URLEncoding.EncodeToString(secretBytes)
+	if s.readEntry == nil {
+		tokenStart = time.Now()
+	} else if s.id.tokenCounter > s.readEntry.TokenCounter {
 		tokenStart = time.Now()
 	} else {
-		id = session.id
-		if id.tokenCounter > session.readEntry.TokenCounter {
-			tokenStart = time.Now()
-		} else {
-			tokenStart = session.readEntry.TokenStart
-		}
-		secret = session.readEntry.Secret
+		tokenStart = s.readEntry.TokenStart
 	}
 
-	err = s.SetEntry(id.EntryId, &SessionEntry{
+	err = s.sessionDB.SetEntry(s.id.EntryId, &store.SessionEntry{
 		buf.Bytes(),
-		time.Now().Add(s.SessionTimeout),
+		time.Now().Add(s.sessionDB.SessionTimeout),
 		tokenStart,
-		secret,
-		id.tokenCounter,
-		session.SecondaryKey,
+		s.id.secret,
+		s.id.tokenCounter,
+		s.SecondaryKey,
 	})
 	if err != nil {
 		return err
 	}
 
-	token := base64.URLEncoding.EncodeToString(sha256Sum(
-		fmt.Sprintf("%s%d", secret, id.tokenCounter),
-	))
-
-	return t.SetTokenData(&TokenData{id.EntryId, token})
+	if !s.tokenHasBeenSet {
+		return s.SetToken()
+	}
+	return nil
 }
 
 func generateRand(size int) ([]byte, error) {

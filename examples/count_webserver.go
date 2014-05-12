@@ -37,7 +37,7 @@ func counter(resp http.ResponseWriter, req *http.Request) {
 
 	session.Values["counter"] = count
 
-	err = sessionDB.SaveSession(session, token)
+	err = session.Save()
 	if err != nil {
 		http.Error(resp, "error", 500)
 		return
