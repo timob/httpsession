@@ -2,11 +2,9 @@
 package httpsession
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/gob"
 	"errors"
 	"fmt"
 	"github.com/timob/httpsession/store"
@@ -114,8 +112,7 @@ func (s *SessionDB) GetSession(t token.SessionToken) (*Session, error) {
 		currentTokenCounter++
 	}
 
-	var vals map[string]interface{}
-	err = gob.NewDecoder(bytes.NewReader(entry.Value)).Decode(&vals)
+	vals, err := store.DecodeSessionValues(entry.Value)
 	if err != nil {
 		return nil, err
 	}
@@ -133,9 +130,7 @@ func (s *SessionDB) GetSession(t token.SessionToken) (*Session, error) {
 
 // Save the session. (Calls SetToken() if it has not already been called.)
 func (s *Session) Save() error {
-	buf := new(bytes.Buffer)
-	enc := gob.NewEncoder(buf)
-	err := enc.Encode(s.Values)
+	encoded, err := store.EncodeSessionValues(s.Values)
 	if err != nil {
 		return err
 	}
@@ -150,7 +145,7 @@ func (s *Session) Save() error {
 	}
 
 	err = s.sessionDB.SetEntry(s.id.EntryId, &store.SessionEntry{
-		buf.Bytes(),
+		encoded,
 		time.Now().Add(s.sessionDB.SessionTimeout),
 		tokenStart,
 		s.id.secret,

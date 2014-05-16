@@ -1,8 +1,10 @@
 package store
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/gob"
 	"fmt"
 	"time"
 )
@@ -44,4 +46,23 @@ func (e *SessionEntry) IsCorrectPreviousToken(token string) bool {
 func sha256Sum(input string) []byte {
 	b := sha256.Sum256([]byte(input))
 	return b[:]
+}
+
+func EncodeSessionValues(values map[string]interface{}) ([]byte, error) {
+	buf := new(bytes.Buffer)
+	enc := gob.NewEncoder(buf)
+	err := enc.Encode(values)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func DecodeSessionValues(encoding []byte) (map[string]interface{}, error) {
+	var vals map[string]interface{}
+	err := gob.NewDecoder(bytes.NewReader(encoding)).Decode(&vals)
+	if err != nil {
+		return nil, err
+	}
+	return vals, nil
 }
