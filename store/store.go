@@ -22,7 +22,7 @@ type SessionEntry struct {
 	TokenStart    time.Time
 	Secret        string //[32]byte
 	TokenCounter  int
-	SecondaryKey  *string
+	SecondaryKey  []string
 }
 
 func (e *SessionEntry) CorrectToken() string {

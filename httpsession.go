@@ -24,7 +24,7 @@ type Session struct {
 	Values          map[string]interface{}
 	id              *sessionId
 	readEntry       *store.SessionEntry
-	SecondaryKey    *string // if not nil, store can use this as a second lookup key
+	SecondaryKey    []string // if not nil, store can use this as a second lookup key
 	sessionDB       *SessionDB
 	token           token.SessionToken
 	tokenHasBeenSet bool
