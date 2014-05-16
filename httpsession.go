@@ -24,7 +24,6 @@ type Session struct {
 	Values          map[string]interface{}
 	id              *sessionId
 	readEntry       *store.SessionEntry
-	SecondaryKey    []string // if not nil, store can use this as a second lookup key
 	sessionDB       *SessionDB
 	token           token.SessionToken
 	tokenHasBeenSet bool
@@ -58,7 +57,7 @@ func newSession(s *SessionDB, t token.SessionToken) (*Session, error) {
 		base64.URLEncoding.EncodeToString(secretBytes),
 	}
 
-	return &Session{make(map[string]interface{}), id, nil, nil, s, t, false}, nil
+	return &Session{make(map[string]interface{}), id, nil, s, t, false}, nil
 }
 
 // Set token data to identify this session. (SetToken() is called automatically
@@ -121,7 +120,6 @@ func (s *SessionDB) GetSession(t token.SessionToken) (*Session, error) {
 		vals,
 		&sessionId{token.EntryId, currentTokenCounter, entry.Secret},
 		entry,
-		entry.SecondaryKey,
 		s,
 		t,
 		false,
@@ -150,7 +148,6 @@ func (s *Session) Save() error {
 		tokenStart,
 		s.id.secret,
 		s.id.tokenCounter,
-		s.SecondaryKey,
 	})
 	if err != nil {
 		return err
@@ -160,6 +157,11 @@ func (s *Session) Save() error {
 		return s.SetToken()
 	}
 	return nil
+}
+
+// Return Id for session
+func (s *Session) SessionId() string {
+	return s.id.EntryId
 }
 
 func generateRand(size int) ([]byte, error) {
