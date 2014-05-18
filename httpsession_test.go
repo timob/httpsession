@@ -32,15 +32,10 @@ func TestSessionCookie(t *testing.T) {
 	}
 
 	request, _ = http.NewRequest("GET", "http://blah/", nil)
-	val := strings.Split(strings.Split(recorder.Header()["Set-Cookie"][0], ";")[0], "websess_id=")[1]
+	val := strings.Split(strings.Split(recorder.Header()["Set-Cookie"][0], ";")[0], "websess=")[1]
 	request.AddCookie(&http.Cookie{
-		Name:  "websess_id",
+		Name:  "websess",
 		Value: val,
-	})
-	val2 := strings.Split(strings.Split(recorder.Header()["Set-Cookie"][1], ";")[0], "websess_token=")[1]
-	request.AddCookie(&http.Cookie{
-		Name:  "websess_token",
-		Value: val2,
 	})
 	recorder = httptest.NewRecorder()
 

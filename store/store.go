@@ -24,13 +24,13 @@ type SessionEntry struct {
 	TokenCounter  int
 }
 
-func (e *SessionEntry) CorrectToken() string {
+func (e *SessionEntry) Auth() string {
 	return base64.URLEncoding.EncodeToString(sha256Sum(
 		fmt.Sprintf("%s%d", e.Secret, e.TokenCounter),
 	))
 }
 
-func (e *SessionEntry) IsCorrectPreviousToken(token string) bool {
+func (e *SessionEntry) IsCorrectPreviousAuth(token string) bool {
 	counter := e.TokenCounter
 	if counter == 0 {
 		return false

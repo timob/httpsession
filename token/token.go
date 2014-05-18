@@ -6,27 +6,33 @@ import (
 	"errors"
 )
 
-// SessionToken contains tokens (ie a browser cookie)
+type TokenData struct {
+	EntryId string
+	Auth    string
+}
+
+// SessionTokenData contains TokenDatas (ie a browser cookie)
 type SessionToken interface {
-	GetTokenData() (token *TokenData, empty bool, err error)
+	GetTokenData() (tokenData *TokenData, isNew bool, err error)
 	SetTokenData(*TokenData) error
 }
 
-// TokenData is used to access a session
-type TokenData struct {
-	EntryId string
-	Token   string
+var AuthLen = sha256.Size
+var EntryIdLen = sha256.Size
+var EncodedAuthLen = base64.URLEncoding.EncodedLen(sha256.Size)
+var EncodedEntryIdLen = base64.URLEncoding.EncodedLen(sha256.Size)
+
+func NewTokenDataFromString(str string) *TokenData {
+	return &TokenData{str[0:EncodedEntryIdLen], str[EncodedEntryIdLen:]}
 }
 
-var TokenLength = sha256.Size
-var EntryIdLength = sha256.Size
+func (t *TokenData) String() string {
+	return t.EntryId + t.Auth
+}
 
-func (s *TokenData) Valid() error {
-	if len(s.EntryId) > base64.URLEncoding.EncodedLen(EntryIdLength) {
-		return errors.New("SessionToken: invalid id")
-	}
-	if len(s.Token) > base64.URLEncoding.EncodedLen(TokenLength) {
-		return errors.New("SessionToken: invalid token")
+func (t *TokenData) Valid() error {
+	if len(t.EntryId) != EncodedEntryIdLen || len(t.Auth) != EncodedAuthLen {
+		return errors.New("SessionTokenData: invalid id")
 	}
 	return nil
 }

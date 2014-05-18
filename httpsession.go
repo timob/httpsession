@@ -43,11 +43,11 @@ var DefaultTokenTimeout time.Duration = DefaultSessionTimeout
 var retryTimeout time.Duration = time.Minute * 1
 
 func newSession(s *SessionDB, t token.SessionToken) (*Session, error) {
-	entryIdBytes, err := generateRand(token.EntryIdLength)
+	entryIdBytes, err := generateRand(token.EntryIdLen)
 	if err != nil {
 		return nil, err
 	}
-	secretBytes, err := generateRand(token.EntryIdLength)
+	secretBytes, err := generateRand(token.EntryIdLen)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +84,7 @@ func (s *SessionDB) GetSession(t token.SessionToken) (*Session, error) {
 	if empty {
 		return newSession(s, t)
 	}
+
 	if err = token.Valid(); err != nil {
 		return nil, err
 	}
@@ -101,8 +102,8 @@ func (s *SessionDB) GetSession(t token.SessionToken) (*Session, error) {
 		return newSession(s, t)
 	}
 
-	if token.Token != entry.CorrectToken() {
-		if !(entry.IsCorrectPreviousToken(token.Token) && time.Now().Before(entry.TokenStart.Add(retryTimeout))) {
+	if token.Auth != entry.Auth() {
+		if !(entry.IsCorrectPreviousAuth(token.Auth) && time.Now().Before(entry.TokenStart.Add(retryTimeout))) {
 			return newSession(s, t)
 		}
 	}
