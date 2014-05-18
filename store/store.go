@@ -11,8 +11,8 @@ import (
 
 // Database interface to fetch/set session entries (eg using Mysql)
 type SessionStore interface {
-	FetchEntry(string) (*SessionEntry, error)
-	SetEntry(string, *SessionEntry) error
+	FindEntry(key string) (entry *SessionEntry, ok bool, err error)
+	AddEntry(key string, entry *SessionEntry) error
 }
 
 // Session entry to be stored by backend.

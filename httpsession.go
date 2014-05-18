@@ -77,22 +77,23 @@ func (s *SessionDB) GetSession(t token.SessionToken) (*Session, error) {
 		return nil, errors.New("SessionStore.GetSession: token.SessionTokenContainer is nil")
 	}
 
-	token, err := t.GetTokenData()
+	token, empty, err := t.GetTokenData()
 	if err != nil {
 		return nil, err
 	}
-	if token == nil {
+	if empty {
 		return newSession(s, t)
 	}
 	if err = token.Valid(); err != nil {
 		return nil, err
 	}
 
-	entry, err := s.FetchEntry(token.EntryId)
+	entry, ok, err := s.FindEntry(token.EntryId)
 	if err != nil {
 		return nil, err
 	}
-	if entry == nil {
+
+	if !ok {
 		return newSession(s, t)
 	}
 
@@ -142,7 +143,7 @@ func (s *Session) Save() error {
 		tokenStart = s.readEntry.TokenStart
 	}
 
-	err = s.sessionDB.SetEntry(s.id.EntryId, &store.SessionEntry{
+	err = s.sessionDB.AddEntry(s.id.EntryId, &store.SessionEntry{
 		encoded,
 		time.Now().Add(s.sessionDB.SessionTimeout),
 		tokenStart,

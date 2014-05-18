@@ -8,7 +8,7 @@ import (
 
 // SessionToken contains tokens (ie a browser cookie)
 type SessionToken interface {
-	GetTokenData() (*TokenData, error)
+	GetTokenData() (token *TokenData, empty bool, err error)
 	SetTokenData(*TokenData) error
 }
 

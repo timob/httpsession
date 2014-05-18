@@ -11,21 +11,21 @@ type SessionCookie struct {
 	Req  *http.Request
 }
 
-func (c *SessionCookie) GetTokenData() (*token.TokenData, error) {
+func (c *SessionCookie) GetTokenData() (*token.TokenData, bool, error) {
 	idCookie, err := c.Req.Cookie(c.Name + "_id")
 	if err == http.ErrNoCookie {
-		return nil, nil
+		return nil, true, nil
 	} else if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	tokenCookie, err := c.Req.Cookie(c.Name + "_token")
 	if err == http.ErrNoCookie {
-		return nil, nil
+		return nil, true, nil
 	} else if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return &token.TokenData{idCookie.Value, tokenCookie.Value}, nil
+	return &token.TokenData{idCookie.Value, tokenCookie.Value}, false, nil
 }
 
 func (c *SessionCookie) SetTokenData(t *token.TokenData) error {

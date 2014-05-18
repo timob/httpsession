@@ -15,14 +15,14 @@ func NewMapSessionStore() *MapSessionStore {
 	return &MapSessionStore{make(map[string]*SessionEntry), &sync.Mutex{}}
 }
 
-func (m *MapSessionStore) FetchEntry(key string) (*SessionEntry, error) {
+func (m *MapSessionStore) FindEntry(key string) (*SessionEntry, bool, error) {
 	if entry, ok := m.data[key]; ok {
-		return entry, nil
+		return entry, true, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
 
-func (m *MapSessionStore) SetEntry(key string, entry *SessionEntry) error {
+func (m *MapSessionStore) AddEntry(key string, entry *SessionEntry) error {
 	m.Lock()
 	defer m.Unlock()
 
