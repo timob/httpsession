@@ -1,67 +1,47 @@
 package store
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/gob"
-	"fmt"
 	"time"
 )
 
-// Database interface to fetch/set session entries (eg using Mysql)
-type SessionStore interface {
+type SessionEntryStore interface {
 	FindEntry(key string) (entry *SessionEntry, ok bool, err error)
 	AddEntry(key string, entry *SessionEntry) error
 }
 
-// Session entry to be stored by backend.
 type SessionEntry struct {
-	Value         []byte
+	Data          []byte
 	SessionExpiry time.Time
-	TokenStart    time.Time
-	Secret        string //[32]byte
-	TokenCounter  int
 }
 
-func (e *SessionEntry) Auth() string {
-	return base64.URLEncoding.EncodeToString(sha256Sum(
-		fmt.Sprintf("%s%d", e.Secret, e.TokenCounter),
-	))
+type SessionData struct {
+	Data []byte
 }
 
-func (e *SessionEntry) IsCorrectPreviousAuth(token string) bool {
-	counter := e.TokenCounter
-	if counter == 0 {
-		return false
+// SessionEntry <-> SessionData
+type SessionDataStore struct {
+	SessionEntryStore
+	SessionExpiry time.Duration
+}
+
+func (s *SessionDataStore) FindSessionData(key string) (d *SessionData, ok bool, err error) {
+	entry, ok, err := s.FindEntry(key)
+	if err != nil || !ok {
+		return
 	}
-	counter--
 
-	return token == base64.URLEncoding.EncodeToString(sha256Sum(
-		fmt.Sprintf("%s%d", e.Secret, counter),
-	))
-}
-
-func sha256Sum(input string) []byte {
-	b := sha256.Sum256([]byte(input))
-	return b[:]
-}
-
-func EncodeSessionValues(values map[string]interface{}) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	enc := gob.NewEncoder(buf)
-	err := enc.Encode(values)
-	if err != nil {
-		return nil, err
+	if time.Now().After(entry.SessionExpiry) {
+		return nil, false, nil
 	}
-	return buf.Bytes(), nil
+
+	d = &SessionData{entry.Data}
+	return
 }
 
-func DecodeSessionValues(encoding []byte) (map[string]interface{}, error) {
-	var vals map[string]interface{}
-	err := gob.NewDecoder(bytes.NewReader(encoding)).Decode(&vals)
-	if err != nil {
-		return nil, err
-	}
-	return vals, nil
+func (s *SessionDataStore) SaveSessionData(key string, d *SessionData) (err error) {
+	err = s.AddEntry(
+		key,
+		&SessionEntry{d.Data, time.Now().Add(s.SessionExpiry)},
+	)
+	return
 }

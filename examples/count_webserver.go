@@ -11,11 +11,12 @@ import (
 	"time"
 )
 
-var sessionDB = &httpsession.SessionDB{
+var sessionDB = httpsession.NewSessionCategory(
+	"websess",
 	mapstore.NewMapSessionStore(),
-	time.Second * 20,
-	time.Second * 80,
-}
+	time.Second*40,
+	time.Second*10,
+)
 
 func counter(resp http.ResponseWriter, req *http.Request) {
 	token := &sessioncookie.SessionCookie{"websess", resp, req}
@@ -26,7 +27,7 @@ func counter(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	var count int
-	v, ok := session.Values["counter"]
+	v, ok := session.Values()["counter"]
 	if ok {
 		count = v.(int)
 	} else {
@@ -35,7 +36,7 @@ func counter(resp http.ResponseWriter, req *http.Request) {
 
 	count++
 
-	session.Values["counter"] = count
+	session.Values()["counter"] = count
 
 	err = session.Save()
 	if err != nil {

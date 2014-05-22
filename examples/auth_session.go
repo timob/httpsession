@@ -14,11 +14,11 @@ import (
 func userauth(resp http.ResponseWriter, req *http.Request, session *httpsession.Session) {
 	if req.URL.Path == "/login" {
 		if req.PostFormValue("password") == "secret" {
-			session.Values["login"] = true
+			session.Values()["login"] = true
 		}
 	}
 
-	loggedIn, _ := session.Values["login"].(bool)
+	loggedIn, _ := session.Values()["login"].(bool)
 	if loggedIn {
 		fmt.Fprint(resp, "Logged In")
 	} else {
@@ -37,16 +37,13 @@ func main() {
 	port := flag.String("port", "7879", "port")
 	flag.Parse()
 
-	sessionDB := &httpsession.SessionDB{
+	sessionServer := httpsession.NewSessionServer(
+		"websess",
 		mapstore.NewMapSessionStore(),
-		time.Second * 30,
-		httpsession.DefaultTokenTimeout,
-	}
-
-	sessionServer := &httpsession.SessionServer{
-		sessionDB,
-		&sessioncookie.Server{"auth"},
-	}
+		&sessioncookie.Server{"websess"},
+		time.Second*20,
+		time.Second*40,
+	)
 
 	http.Handle("/", sessionServer.Handle(httpsession.HandlerFunc(userauth)))
 	err := http.ListenAndServe(":"+*port, nil)

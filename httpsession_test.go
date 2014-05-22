@@ -13,18 +13,19 @@ func TestSessionCookie(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request, _ := http.NewRequest("GET", "http://blah/", nil)
 
-	sessionDB := &SessionDB{
+	sessionDB := NewSessionCategory(
+		"websess",
 		mapstore.NewMapSessionStore(),
 		DefaultSessionTimeout,
-		DefaultTokenTimeout,
-	}
+		DefaultAuthTimeout,
+	)
 
 	token := &sessioncookie.SessionCookie{"websess", recorder, request}
 	session, err := sessionDB.GetSession(token)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.Values["hello"] = "world"
+	session.Values()["hello"] = "world"
 	err = session.Save()
 	t.Logf("recorder %v", recorder)
 	if err != nil {
@@ -44,7 +45,7 @@ func TestSessionCookie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, ok := session.Values["hello"]
+	v, ok := session.Values()["hello"]
 	if !ok || v.(string) != "world" {
 		t.Fatal("expecting session map to be set")
 	}

@@ -31,7 +31,7 @@ func (t *TokenData) String() string {
 }
 
 func (t *TokenData) Valid() error {
-	if len(t.EntryId) != EncodedEntryIdLen || len(t.Auth) != EncodedAuthLen {
+	if len(t.EntryId) != EncodedEntryIdLen && len(t.Auth) != EncodedAuthLen {
 		return errors.New("SessionTokenData: invalid id")
 	}
 	return nil
