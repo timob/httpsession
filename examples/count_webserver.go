@@ -5,45 +5,49 @@ import (
 	"fmt"
 	"github.com/timob/httpsession"
 	"github.com/timob/httpsession/store/mapstore"
-	"github.com/timob/httpsession/token/sessioncookie"
+	"github.com/timob/httpsession/token"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 )
 
-var sessionDB = httpsession.NewSessionCategory(
-	"websess",
-	mapstore.NewMapSessionStore(),
-	time.Second*40,
-	time.Second*10,
-)
+var mapStore = mapstore.NewMapSessionStore()
 
 func counter(resp http.ResponseWriter, req *http.Request) {
-	token := &sessioncookie.SessionCookie{"websess", resp, req}
-	session, err := sessionDB.GetSession(token)
+	var err error
+	defer func() {
+		if err != nil {
+			http.Error(resp, "error", 500)
+		}
+	}()
+
+	args, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
-		http.Error(resp, "error", 500)
+		return
+	}
+	sessionArg := token.TokenStr(args.Get("session"))
+
+	session, sessionToken, err := httpsession.OpenSession(sessionArg, mapStore)
+	if err != nil {
+		return
+	}
+	defer func() {
+		session.Save(time.Second * 40)
+		err = session.GetLastError()
+	}()
+
+	if sessionToken != sessionArg {
+		args.Set("session", sessionToken.String())
+		req.URL.RawQuery = args.Encode()
+		resp.Header().Set("Location", req.URL.String())
+		http.Error(resp, "See Other", 303)
 		return
 	}
 
-	var count int
-	v, ok := session.Values()["counter"]
-	if ok {
-		count = v.(int)
-	} else {
-		count = 0
-	}
-
+	count := session.IntVar("counter")
 	count++
-
-	session.Values()["counter"] = count
-
-	err = session.Save()
-	if err != nil {
-		http.Error(resp, "error", 500)
-		return
-	}
-
+	session.SetVar("counter", count)
 	fmt.Fprintf(resp, "counter = %d", count)
 }
 

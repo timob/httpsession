@@ -5,22 +5,24 @@ import (
 	"fmt"
 	"github.com/timob/httpsession"
 	"github.com/timob/httpsession/store/mapstore"
-	"github.com/timob/httpsession/token/sessioncookie"
 	"log"
 	"net/http"
 	"time"
 )
 
-func userauth(resp http.ResponseWriter, req *http.Request, session *httpsession.Session) {
+func userauth(resp http.ResponseWriter, req *http.Request, session *httpsession.CookieSession) {
 	if req.URL.Path == "/login" {
 		if req.PostFormValue("password") == "secret" {
-			session.Values()["login"] = true
+			session.SetVar("login", true)
 		}
+	} else if req.URL.Path == "/logout" {
+		// Create a new session, by clearing values and recreating session
+		session.Clear()
+		session.Recreate()
 	}
 
-	loggedIn, _ := session.Values()["login"].(bool)
-	if loggedIn {
-		fmt.Fprint(resp, "Logged In")
+	if session.BoolVar("login") {
+		fmt.Fprint(resp, `<html> Logged In (<a href="/logout">log out</a>)`)
 	} else {
 		fmt.Fprint(resp, `<html>
 		Logged Out
@@ -37,13 +39,7 @@ func main() {
 	port := flag.String("port", "7879", "port")
 	flag.Parse()
 
-	sessionServer := httpsession.NewSessionServer(
-		"websess",
-		mapstore.NewMapSessionStore(),
-		&sessioncookie.Server{"websess"},
-		time.Second*20,
-		time.Second*40,
-	)
+	sessionServer := &httpsession.SessionServer{Name: "websess", Store: mapstore.NewMapSessionStore(), AuthTokenTimeout: time.Second * 15}
 
 	http.Handle("/", sessionServer.Handle(httpsession.HandlerFunc(userauth)))
 	err := http.ListenAndServe(":"+*port, nil)

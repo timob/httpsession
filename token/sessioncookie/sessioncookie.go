@@ -11,38 +11,38 @@ type SessionCookie struct {
 	Req  *http.Request
 }
 
-func (c *SessionCookie) GetTokenData() (*token.TokenData, bool, error) {
+func (c *SessionCookie) GetToken() token.Token {
 	idCookie, err := c.Req.Cookie(c.Name)
 	if err == http.ErrNoCookie {
-		return nil, true, nil
-	} else if err != nil {
-		return nil, false, err
+		return token.EmptyToken
 	}
-	return token.NewTokenDataFromString(idCookie.Value), false, nil
+	return token.TokenStr(idCookie.Value)
 }
 
-func (c *SessionCookie) SetTokenData(t *token.TokenData) error {
+func (c *SessionCookie) SetToken(t token.Token) {
+	var val string
+	var maxAge int
+	if !t.IsEmpty() {
+		val = t.String()
+		maxAge = 60 * 60 * 24 * 365
+	} else {
+		val = ""
+		maxAge = -1
+	}
 	http.SetCookie(
 		c.Resp,
 		&http.Cookie{
 			Name:     c.Name,
-			Value:    t.String(),
+			Value:    val,
 			Path:     "/",
 			Domain:   c.Req.URL.Host,
-			MaxAge:   60 * 60 * 24 * 365,
+			MaxAge:   maxAge,
 			HttpOnly: true,
 		},
 	)
-	return nil
+	return
 }
 
-type Server struct {
-	CookieName string
-}
-
-func (s *Server) Handle(h token.Handler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		token := &SessionCookie{s.CookieName, w, r}
-		h.ServeHTTP(w, r, token)
-	}
+func (c *SessionCookie) Remove() {
+	c.SetToken(token.EmptyToken)
 }

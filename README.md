@@ -15,30 +15,18 @@ import (
 	"fmt"
 	"github.com/timob/httpsession"
 	"github.com/timob/httpsession/store/mapstore"
-	"github.com/timob/httpsession/token/sessioncookie"
 	"log"
 	"net/http"
-	"time"
 )
 
 func main() {
-	sessionServer := httpsession.NewSessionServer(
-		"websess",                        //name
-		mapstore.NewMapSessionStore(),    //session store
-		&sessioncookie.Server{"websess"}, //token cookie
-		time.Second*20,                   //session timeout
-		time.Second*40,                   //change cookie timeout
-	)
+	sessionServer := &httpsession.SessionServer{Name: "websess", Store: mapstore.NewMapSessionStore()}
 
 	http.Handle("/", sessionServer.Handle(httpsession.HandlerFunc(
-		func(resp http.ResponseWriter, req *http.Request, session *httpsession.Session) {
-			if _, ok := session.Values()["counter"]; !ok {
-				session.Values()["counter"] = 0
-			}
-
-			counter := session.Values()["counter"].(int)
+		func(resp http.ResponseWriter, req *http.Request, session *httpsession.CookieSession) {
+			counter := session.IntVar("counter")
 			fmt.Fprintf(resp, "counter = %d", counter)
-			session.Values()["counter"] = counter + 1
+			session.SetVar("counter", counter+1)
 		},
 	)))
 
@@ -46,6 +34,5 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-}
-```
+}```
 

@@ -1,38 +1,37 @@
 package token
 
-import (
-	"crypto/sha256"
-	"encoding/base64"
-	"errors"
-)
-
-type TokenData struct {
-	EntryId string
-	Auth    string
+type Token interface {
+	String() string
+	IsEmpty() bool
+	Equal(Token) bool
 }
 
-// SessionTokenData contains TokenDatas (ie a browser cookie)
-type SessionToken interface {
-	GetTokenData() (tokenData *TokenData, isNew bool, err error)
-	SetTokenData(*TokenData) error
+type TokenStr string
+
+func (t TokenStr) String() string {
+	return string(t)
 }
 
-var AuthLen = sha256.Size
-var EntryIdLen = sha256.Size
-var EncodedAuthLen = base64.URLEncoding.EncodedLen(sha256.Size)
-var EncodedEntryIdLen = base64.URLEncoding.EncodedLen(sha256.Size)
-
-func NewTokenDataFromString(str string) *TokenData {
-	return &TokenData{str[0:EncodedEntryIdLen], str[EncodedEntryIdLen:]}
+func (t TokenStr) IsEmpty() bool {
+	return false
 }
 
-func (t *TokenData) String() string {
-	return t.EntryId + t.Auth
+func (t TokenStr) Equal(e Token) bool {
+	return e.IsEmpty() == false && t.String() == e.String()
 }
 
-func (t *TokenData) Valid() error {
-	if len(t.EntryId) != EncodedEntryIdLen && len(t.Auth) != EncodedAuthLen {
-		return errors.New("SessionTokenData: invalid id")
-	}
-	return nil
+type emptyToken struct{}
+
+func (e emptyToken) String() string {
+	return ""
 }
+
+func (e emptyToken) IsEmpty() bool {
+	return true
+}
+
+func (t emptyToken) Equal(e Token) bool {
+	return e.IsEmpty()
+}
+
+var EmptyToken emptyToken
