@@ -236,14 +236,6 @@ func (s *sessionValues) NewSessionValues() {
 	s.values.Values = make(map[string]interface{})
 }
 
-func (s *sessionValues) SessionNest() interface{} {
-	return s.values.Nest
-}
-
-func (s *sessionValues) SetSessionNest(i interface{}) {
-	s.values.Nest = i
-}
-
 func (s *sessionValues) Values() map[string]interface{} {
 	return s.values.Values
 }
@@ -362,7 +354,9 @@ type sessionAuth struct {
 	authStr                   string
 	UpdateAuthStartTimeOnSave bool
 	AuthTimeout               time.Duration
-	session
+	session                   session
+	nest                      interface{}
+	*sessionValues
 }
 
 func (s *sessionAuth) AuthStr() string {
@@ -388,7 +382,7 @@ func (s *sessionAuth) LoadAuthSession() (ok bool, err error) {
 		return
 	}
 
-	nested := s.session.SessionNest()
+	nested := s.nest
 	if v, ok := nested.(struct {
 		AuthStart     time.Time
 		SecretStr     string
@@ -431,8 +425,32 @@ func (s *sessionAuth) SaveAuthSession() (err error) {
 		s.Auth.AuthStart = time.Now()
 	}
 
-	s.session.SetSessionNest(s.Auth)
 	return s.session.SaveSession()
+}
+
+func (s *sessionAuth) LoadSessionValues(values interface{}) (err error) {
+	if v, ok := values.(struct {
+		Values map[string]interface{}
+		Nest   interface{}
+	}); ok {
+		s.nest = v.Nest
+	} else {
+		return fmt.Errorf("unexpected type %T", values)
+	}
+
+	return s.sessionValues.LoadSessionValues(values)
+}
+
+func (s *sessionAuth) SaveSessionValues(valuesStore *interface{}) {
+	var i interface{}
+	s.sessionValues.SaveSessionValues(&i)
+	if v, ok := i.(struct {
+		Values map[string]interface{}
+		Nest   interface{}
+	}); ok {
+		v.Nest = s.Auth
+		*valuesStore = v
+	}
 }
 
 type sessionTimestamp struct {
@@ -477,8 +495,6 @@ type session interface {
 	LoadSessionValues(values interface{}) (err error)
 	SaveSessionValues(valuesStore *interface{})
 	NewSessionValues()
-	SessionNest() interface{}
-	SetSessionNest(i interface{})
 	SetLastError(error)
 }
 
@@ -487,13 +503,16 @@ type sessionHandle struct {
 }
 
 type authSession interface {
-	session
 	LoadAuthSession() (bool, error)
 	SaveAuthSession() error
 	NewAuthSession() error
 	SetAuthStr(string)
 	AuthStr() string
 	SetAuthStrTimeout(time.Duration)
+}
+
+type authSessionHandle struct {
+	session
 }
 
 type sessionExternal interface {
@@ -568,15 +587,13 @@ func OpenSession(idToken token.Token, store store.SessionEntryStore) (sessionR *
 
 func OpenSessionWithAuth(idToken token.Token, authToken token.Token, authTokenTimeout time.Duration, store store.SessionEntryStore) (sessionR *Session, sessionIdToken token.Token, sessionAuthToken token.Token, err error) {
 	var handle sessionHandle
-
 	authSession := &struct {
 		*sessionData
+		*sessionAuth
 		sessionEncoder
-		*sessionValues
 		*randomKey
 		*sessionError
-		*sessionAuth
-	}{&sessionData{session: &handle}, &sessionJSON{session: &authSessionJSON{&handle}}, &sessionValues{session: &handle}, &randomKey{session: &handle}, &sessionError{}, &sessionAuth{session: &handle}}
+	}{&sessionData{session: &handle}, &sessionAuth{session: &handle, sessionValues: &sessionValues{session: &handle}}, &encodeLog{&sessionJSON{session: &authSessionJSON{&handle}}}, &randomKey{session: &handle}, &sessionError{}}
 	handle.session = authSession
 
 	authSession.SetKey(idToken.String())
