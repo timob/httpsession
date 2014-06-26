@@ -48,7 +48,7 @@ func counter(resp http.ResponseWriter, req *http.Request) {
 	count := session.IntVar("counter")
 	count++
 	session.SetVar("counter", count)
-	fmt.Fprintf(resp, "counter = %d", count)
+	fmt.Fprintf(resp, "counter = %d, lastupdate %s", count, session.DurationSinceLastUpdate())
 }
 
 func main() {

@@ -16,9 +16,7 @@ func userauth(resp http.ResponseWriter, req *http.Request, session *httpsession.
 			session.SetVar("login", true)
 		}
 	} else if req.URL.Path == "/logout" {
-		// Create a new session, by clearing values and recreating session
-		session.Clear()
-		session.Recreate()
+		session.New()
 	}
 
 	if session.BoolVar("login") {

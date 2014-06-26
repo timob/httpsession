@@ -9,23 +9,20 @@ import (
 )
 
 type CookieSession struct {
-	cookie *sessioncookie.SessionCookie
-	sessionExternal
-	sessionInternal *Session
-	saved           bool
+	*sessioncookie.SessionCookie
+	*Session
+	saved bool
 }
 
 func (c *CookieSession) Save(timeout time.Duration) {
-	c.sessionInternal.Save(timeout)
-	if timeout == 0 {
-		c.cookie.Remove()
-	}
+	c.Session.Save(timeout)
 	c.saved = true
 }
 
-func (c *CookieSession) Recreate() {
-	token := c.sessionInternal.Recreate()
-	c.cookie.SetToken(token)
+func (c *CookieSession) New() {
+	c.Session.Clear()
+	token := c.Session.Recreate()
+	c.SessionCookie.SetToken(token)
 }
 
 // HTTP handler with *Session
@@ -77,7 +74,7 @@ func (s *SessionServer) Handle(h Handler) http.Handler {
 			authCookie.SetToken(authToken)
 		}
 
-		cs := &CookieSession{cookie, session, session, false}
+		cs := &CookieSession{cookie, session, false}
 		h.ServeHTTP(w, r, cs)
 		if cs.saved == false {
 			session.Save(time.Minute * 30)
