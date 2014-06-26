@@ -21,7 +21,7 @@ import (
 var retryTimeout time.Duration = time.Minute * 1
 
 type randomKey struct {
-	session *sessionHandle
+	session session
 }
 
 func (r *randomKey) GenerateSessionKey() (key string, err error) {
@@ -38,7 +38,7 @@ type sessionData struct {
 	Data []byte
 	store.SessionEntryStore
 	SessionTimeout time.Duration
-	session        *sessionHandle
+	session        session
 }
 
 func (s *sessionData) SetSessionTimeout(t time.Duration) {
@@ -93,7 +93,7 @@ func (s *sessionData) SaveSession() (err error) {
 
 type sessionGob struct {
 	Info    interface{}
-	session *sessionHandle
+	session session
 }
 
 func (s *sessionGob) Decode(data []byte) (err error) {
@@ -118,7 +118,7 @@ func (s *sessionGob) Encode(dataPtr *[]byte) (err error) {
 }
 
 type sessionJSON struct {
-	session *sessionHandle
+	session session
 }
 
 func (s *sessionJSON) Decode(data []byte) (err error) {
@@ -153,7 +153,7 @@ func (s *sessionJSON) Encode(dataPtr *[]byte) (err error) {
 }
 
 type authSessionJSON struct {
-	*sessionHandle
+	session
 }
 
 func (s *authSessionJSON) LoadSessionValues(i interface{}) (err error) {
@@ -177,7 +177,7 @@ func (s *authSessionJSON) LoadSessionValues(i interface{}) (err error) {
 		Nest          interface{}
 	}{jsonData.AuthStart, jsonData.SecretStr, jsonData.SecretCounter, jsonData.Nest}
 	sessionValues.Nest = authInfo
-	return s.sessionHandle.LoadSessionValues(sessionValues)
+	return s.session.LoadSessionValues(sessionValues)
 }
 
 type sessionEncoder interface {
@@ -212,7 +212,7 @@ type sessionValues struct {
 		Values map[string]interface{}
 		Nest   interface{}
 	}
-	session *sessionHandle
+	session session
 }
 
 func (s *sessionValues) LoadSessionValues(values interface{}) (err error) {
@@ -362,7 +362,7 @@ type sessionAuth struct {
 	authStr                   string
 	UpdateAuthStartTimeOnSave bool
 	AuthTimeout               time.Duration
-	session                   *sessionHandle
+	session
 }
 
 func (s *sessionAuth) AuthStr() string {
@@ -433,6 +433,18 @@ func (s *sessionAuth) SaveAuthSession() (err error) {
 
 	s.session.SetSessionNest(s.Auth)
 	return s.session.SaveSession()
+}
+
+type sessionTimestamp struct {
+	timestamp time.Time
+}
+
+func (s *sessionTimestamp) DurationSinceLastUpdate() time.Duration {
+	return time.Now().Sub(s.timestamp)
+}
+
+func (s *sessionTimestamp) SaveSessionTimestamp() {
+	s.timestamp = time.Now()
 }
 
 func init() {
@@ -556,6 +568,7 @@ func OpenSession(idToken token.Token, store store.SessionEntryStore) (sessionR *
 
 func OpenSessionWithAuth(idToken token.Token, authToken token.Token, authTokenTimeout time.Duration, store store.SessionEntryStore) (sessionR *Session, sessionIdToken token.Token, sessionAuthToken token.Token, err error) {
 	var handle sessionHandle
+
 	authSession := &struct {
 		*sessionData
 		sessionEncoder
@@ -563,7 +576,7 @@ func OpenSessionWithAuth(idToken token.Token, authToken token.Token, authTokenTi
 		*randomKey
 		*sessionError
 		*sessionAuth
-	}{&sessionData{session: &handle}, &encodeLog{&sessionJSON{session: &sessionHandle{&authSessionJSON{&handle}}}}, &sessionValues{session: &handle}, &randomKey{session: &handle}, &sessionError{}, &sessionAuth{session: &handle}}
+	}{&sessionData{session: &handle}, &sessionJSON{session: &authSessionJSON{&handle}}, &sessionValues{session: &handle}, &randomKey{session: &handle}, &sessionError{}, &sessionAuth{session: &handle}}
 	handle.session = authSession
 
 	authSession.SetKey(idToken.String())
