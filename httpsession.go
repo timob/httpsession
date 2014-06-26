@@ -118,19 +118,23 @@ func (s *sessionGob) Encode(dataPtr *[]byte) (err error) {
 }
 
 type sessionJSON struct {
-	values struct {
-		Values map[string]interface{}
-		Nest   interface{}
-	}
 	session *sessionHandle
 }
 
 func (s *sessionJSON) Decode(data []byte) (err error) {
-	err = json.Unmarshal(data, &s.values)
+	jsonData := struct {
+		Values map[string]interface{}
+		Nest   json.RawMessage
+	}{}
+	err = json.Unmarshal(data, &jsonData)
 	if err != nil {
 		return
 	}
-	return s.session.LoadSessionValues(s.values)
+	sessionValues := struct {
+		Values map[string]interface{}
+		Nest   interface{}
+	}{jsonData.Values, jsonData.Nest}
+	return s.session.LoadSessionValues(sessionValues)
 }
 
 func (s *sessionJSON) Encode(dataPtr *[]byte) (err error) {
@@ -149,53 +153,31 @@ func (s *sessionJSON) Encode(dataPtr *[]byte) (err error) {
 }
 
 type authSessionJSON struct {
-	values struct {
-		Values map[string]interface{}
-		Nest   interface{}
-	}
-	values2 struct {
-		Values map[string]interface{}
-		Auth   struct {
-			AuthStart     time.Time
-			SecretStr     string //[32]byte
-			SecretCounter uint
-			Nest          interface{}
-		}
-	}
-	session *sessionHandle
+	*sessionHandle
 }
 
-func (s *authSessionJSON) Decode(data []byte) (err error) {
-	err = json.Unmarshal(data, &s.values2)
-	if err != nil {
-		return
-	}
-	s.values.Values = s.values2.Values
-	s.values.Nest = s.values2.Auth
-
-	return s.session.LoadSessionValues(s.values)
-}
-
-func (s *authSessionJSON) Encode(dataPtr *[]byte) (err error) {
-	var i interface{}
-	s.session.SaveSessionValues(&i)
-	s.values = i.(struct {
+func (s *authSessionJSON) LoadSessionValues(i interface{}) (err error) {
+	sessionValues := i.(struct {
 		Values map[string]interface{}
 		Nest   interface{}
 	})
-	s.values2.Values = s.values.Values
-	s.values2.Auth = s.values.Nest.(struct {
+	rawJson := sessionValues.Nest.(json.RawMessage)
+	jsonData := struct {
 		AuthStart     time.Time
-		SecretStr     string
+		SecretStr     string //[32]byte
+		SecretCounter uint
+		Nest          json.RawMessage
+	}{}
+
+	err = json.Unmarshal(rawJson, &jsonData)
+	authInfo := struct {
+		AuthStart     time.Time
+		SecretStr     string //[32]byte
 		SecretCounter uint
 		Nest          interface{}
-	})
-	jb, err := json.Marshal(s.values2)
-	if err != nil {
-		return
-	}
-	*dataPtr = jb
-	return
+	}{jsonData.AuthStart, jsonData.SecretStr, jsonData.SecretCounter, jsonData.Nest}
+	sessionValues.Nest = authInfo
+	return s.sessionHandle.LoadSessionValues(sessionValues)
 }
 
 type sessionEncoder interface {
@@ -581,7 +563,7 @@ func OpenSessionWithAuth(idToken token.Token, authToken token.Token, authTokenTi
 		*randomKey
 		*sessionError
 		*sessionAuth
-	}{&sessionData{session: &handle}, &authSessionJSON{session: &handle}, &sessionValues{session: &handle}, &randomKey{session: &handle}, &sessionError{}, &sessionAuth{session: &handle}}
+	}{&sessionData{session: &handle}, &encodeLog{&sessionJSON{session: &sessionHandle{&authSessionJSON{&handle}}}}, &sessionValues{session: &handle}, &randomKey{session: &handle}, &sessionError{}, &sessionAuth{session: &handle}}
 	handle.session = authSession
 
 	authSession.SetKey(idToken.String())
