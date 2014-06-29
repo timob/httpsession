@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"github.com/timob/httpsession/store"
 	"github.com/timob/httpsession/token"
+	"io"
 	"log"
+	"reflect"
 	"time"
 )
 
@@ -34,8 +36,7 @@ func (r *randomKey) GenerateSessionKey() (key string, err error) {
 }
 
 type sessionData struct {
-	key  string
-	Data []byte
+	key string
 	store.SessionEntryStore
 	SessionTimeout time.Duration
 	session        session
@@ -68,8 +69,13 @@ func (s *sessionData) LoadSession() (ok bool, err error) {
 		return false, nil
 	}
 
-	s.Data = entry.Data
-	err = s.session.Decode(s.Data)
+	buf := bytes.NewBuffer(entry.Data)
+	s.session.NewDecoder(buf)
+
+	err = s.session.LoadSessionValues()
+	if err != nil {
+		ok = false
+	}
 	return
 }
 
@@ -78,181 +84,180 @@ func (s *sessionData) NewSession() (err error) {
 	if err != nil {
 		return
 	}
-	s.session.NewSessionValues()
-	return
+	return s.session.NewSessionValues()
 }
 
 func (s *sessionData) SaveSession() (err error) {
-	err = s.session.Encode(&s.Data)
+	buf := new(bytes.Buffer)
+	s.session.NewEncoder(buf)
+
+	err = s.session.SaveSessionValues()
 	if err != nil {
 		return
 	}
 
-	return s.AddEntry(s.key, &store.SessionEntry{s.Data, time.Now().Add(s.SessionTimeout)})
+	err = s.session.FinishEncode()
+	if err != nil {
+		return
+	}
+
+	return s.AddEntry(s.key, &store.SessionEntry{buf.Bytes(), time.Now().Add(s.SessionTimeout)})
 }
 
 type sessionGob struct {
-	Info    interface{}
-	session session
+	enc *gob.Encoder
+	dec *gob.Decoder
 }
 
-func (s *sessionGob) Decode(data []byte) (err error) {
-	err = gob.NewDecoder(bytes.NewReader(data)).Decode(&s.Info)
-	if err != nil {
-		return
-	}
-	return s.session.LoadSessionValues(s.Info)
+func (s *sessionGob) NewEncoder(w io.Writer) {
+	s.enc = gob.NewEncoder(w)
 }
 
-func (s *sessionGob) Encode(dataPtr *[]byte) (err error) {
-	s.session.SaveSessionValues(&s.Info)
-	buf := new(bytes.Buffer)
-	enc := gob.NewEncoder(buf)
-	err = enc.Encode(&s.Info)
-	if err != nil {
-		return
-	}
-
-	*dataPtr = buf.Bytes()
-	return
+func (s *sessionGob) Encode(v interface{}) error {
+	return s.enc.Encode(v)
 }
+
+func (s *sessionGob) NewDecoder(r io.Reader) {
+	s.dec = gob.NewDecoder(r)
+}
+
+func (s *sessionGob) Decode(v interface{}) error {
+	return s.dec.Decode(v)
+}
+
+func (s *sessionGob) FinishEncode() error { return nil }
 
 type sessionJSON struct {
-	session session
+	enc *json.Encoder
+	dec *json.Decoder
 }
 
-func (s *sessionJSON) Decode(data []byte) (err error) {
-	jsonData := struct {
-		Values    map[string]interface{}
-		Timestamp time.Time
-		Nest      json.RawMessage
-	}{}
-	err = json.Unmarshal(data, &jsonData)
+func (s *sessionJSON) NewEncoder(w io.Writer) {
+	s.enc = json.NewEncoder(w)
+}
+
+func (s *sessionJSON) Encode(v interface{}) error {
+	return s.enc.Encode(v)
+}
+
+func (s *sessionJSON) NewDecoder(r io.Reader) {
+	s.dec = json.NewDecoder(r)
+}
+
+func (s *sessionJSON) Decode(v interface{}) error {
+	return s.dec.Decode(v)
+}
+
+func (s *sessionJSON) FinishEncode() error { return nil }
+
+type sessionJSONObject struct {
+	codec sessionJSON
+	raw   map[string]json.RawMessage
+	imap  map[string]interface{}
+}
+
+func (s *sessionJSONObject) NewEncoder(w io.Writer) {
+	s.codec.NewEncoder(w)
+	s.imap = make(map[string]interface{})
+}
+
+func (s *sessionJSONObject) Encode(v interface{}) (err error) {
+	name, err := s.getValName(v)
 	if err != nil {
 		return
 	}
-	sessionValues := struct {
-		Values    map[string]interface{}
-		Timestamp time.Time
-		Nest      interface{}
-	}{jsonData.Values, jsonData.Timestamp, jsonData.Nest}
-	return s.session.LoadSessionValues(sessionValues)
-}
-
-func (s *sessionJSON) Encode(dataPtr *[]byte) (err error) {
-	var i interface{}
-	s.session.SaveSessionValues(&i)
-	v := i.(struct {
-		Values    map[string]interface{}
-		Timestamp time.Time
-		Nest      interface{}
-	})
-	jb, err := json.Marshal(v)
-	if err != nil {
-		return
-	}
-	*dataPtr = jb
+	s.imap[name] = v
 	return
 }
 
-type authSessionJSON struct {
-	session
+func (s *sessionJSONObject) FinishEncode() (err error) {
+	return s.codec.Encode(s.imap)
 }
 
-func (s *authSessionJSON) LoadSessionValues(i interface{}) (err error) {
-	sessionValues := i.(struct {
-		Values    map[string]interface{}
-		Timestamp time.Time
-		Nest      interface{}
-	})
-	rawJson := sessionValues.Nest.(json.RawMessage)
-	jsonData := struct {
-		AuthStart     time.Time
-		SecretStr     string //[32]byte
-		SecretCounter uint
-		Nest          json.RawMessage
-	}{}
-
-	err = json.Unmarshal(rawJson, &jsonData)
-	authInfo := struct {
-		AuthStart     time.Time
-		SecretStr     string //[32]byte
-		SecretCounter uint
-		Nest          interface{}
-	}{jsonData.AuthStart, jsonData.SecretStr, jsonData.SecretCounter, jsonData.Nest}
-	sessionValues.Nest = authInfo
-	return s.session.LoadSessionValues(sessionValues)
+func (s *sessionJSONObject) NewDecoder(r io.Reader) {
+	s.codec.NewDecoder(r)
+	s.raw = make(map[string]json.RawMessage)
 }
 
-type sessionEncoder interface {
-	Decode([]byte) error
-	Encode(*[]byte) error
-}
-
-type encodeLog struct {
-	sessionEncoder
-}
-
-func (e *encodeLog) Encode(dataPtr *[]byte) (err error) {
-	err = e.sessionEncoder.Encode(dataPtr)
+func (s *sessionJSONObject) Decode(v interface{}) (err error) {
+	if len(s.raw) == 0 {
+		err = s.codec.Decode(&s.raw)
+		if err != nil {
+			return
+		}
+	}
+	name, err := s.getValName(v)
 	if err != nil {
 		return
 	}
-	log.Printf("session encoding: %s", *dataPtr)
+
+	if rawJson, ok := s.raw[name]; ok {
+		err = json.NewDecoder(bytes.NewBuffer(rawJson)).Decode(v)
+		if err != nil {
+			return
+		}
+	} else {
+		return fmt.Errorf("decode: can't find %s in json", name)
+	}
 	return
 }
 
-func (e *encodeLog) Decode(data []byte) (err error) {
-	err = e.sessionEncoder.Decode(data)
+func (s *sessionJSONObject) getValName(v interface{}) (string, error) {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Ptr {
+		return "", errors.New("encode: parameter must be a pointer to object")
+	}
+	t := reflect.Indirect(rv).Type()
+	if t.Name() == "" {
+		return "", errors.New("encode: object must have name")
+	}
+	return t.Name(), nil
+}
+
+type sessionCodecLog struct {
+	sessionCodec
+	buf *bytes.Buffer
+}
+
+func (s *sessionCodecLog) NewEncoder(w io.Writer) {
+	s.buf = new(bytes.Buffer)
+	m := io.MultiWriter(w, s.buf)
+	s.sessionCodec.NewEncoder(m)
+}
+
+func (s *sessionCodecLog) FinishEncode() (err error) {
+	err = s.sessionCodec.FinishEncode()
 	if err != nil {
 		return
 	}
-	log.Printf("session decoding: %s", data)
+	buf := new(bytes.Buffer)
+	json.Indent(buf, s.buf.Bytes(), "", "    ")
+	log.Printf("encoding %s", buf.Bytes())
 	return
 }
 
 type sessionValues struct {
-	values struct {
-		Values    map[string]interface{}
-		Timestamp time.Time
-		Nest      interface{}
-	}
-	session session
+	Values    map[string]interface{}
+	Timestamp time.Time
+	session   session `json:"-"`
 }
 
-func (s *sessionValues) LoadSessionValues(values interface{}) (err error) {
-	if v, ok := values.(struct {
-		Values    map[string]interface{}
-		Timestamp time.Time
-		Nest      interface{}
-	}); ok {
-		s.values = v
-	} else {
-		return fmt.Errorf("unexpected type %T", values)
-	}
+func (s *sessionValues) LoadSessionValues() (err error) {
+	return s.session.Decode(s)
+}
 
+func (s *sessionValues) SaveSessionValues() error {
+	s.Timestamp = time.Now()
+	return s.session.Encode(s)
+}
+
+func (s *sessionValues) NewSessionValues() (err error) {
+	s.Values = make(map[string]interface{})
 	return
 }
 
-func (s *sessionValues) SaveSessionValues(valuesStore *interface{}) {
-	s.values.Timestamp = time.Now()
-	*valuesStore = s.values
-}
-
-func (s *sessionValues) NewSessionValues() {
-	s.values.Values = make(map[string]interface{})
-}
-
-func (s *sessionValues) SessionNest() interface{} {
-	return s.values.Nest
-}
-
-func (s *sessionValues) SetSessionNest(i interface{}) {
-	s.values.Nest = i
-}
-
-func (s *sessionValues) Values() map[string]interface{} {
-	return s.values.Values
+func (s *sessionValues) SValues() map[string]interface{} {
+	return s.Values
 }
 
 func (s *sessionValues) Clear() {
@@ -260,11 +265,11 @@ func (s *sessionValues) Clear() {
 }
 
 func (s *sessionValues) SetVar(key string, i interface{}) {
-	s.values.Values[key] = i
+	s.Values[key] = i
 }
 
 func (s *sessionValues) GetVal(key string, dst interface{}) {
-	i, ok := s.values.Values[key]
+	i, ok := s.Values[key]
 	if !ok {
 		s.session.SetLastError(fmt.Errorf("unkown session value named: %s", key))
 		return
@@ -310,6 +315,7 @@ func (s *sessionValues) GetVal(key string, dst interface{}) {
 		s.session.SetLastError(fmt.Errorf("session value unkown type %T", i))
 	}
 
+	s.session.SetLastError(nil)
 	//	log.Printf("here2 %v, ok %v", *val.(*int), ok)
 	return
 }
@@ -355,101 +361,106 @@ func (s *sessionValues) Var(key string) (v interface{}) {
 }
 
 func (s *sessionValues) DurationSinceLastUpdate() time.Duration {
-	return time.Now().Sub(s.values.Timestamp)
+	return time.Now().Sub(s.Timestamp)
 }
 
 func init() {
-	gob.Register((sessionValues{}).values)
+	gob.Register(sessionValues{})
+}
+
+type sessionAuthParam struct {
+	authStr     string
+	AuthTimeout time.Duration
+}
+
+func (s *sessionAuthParam) SetAuthStr(e string) {
+	s.authStr = e
+}
+
+func (s *sessionAuthParam) AuthStr() string {
+	return s.authStr
+}
+
+func (s *sessionAuthParam) SetAuthStrTimeout(t time.Duration) {
+	s.AuthTimeout = t
+}
+
+func (s *sessionAuthParam) AuthStrTimeout() time.Duration {
+	return s.AuthTimeout
 }
 
 // entryInfo <-> sessionInfo
 type sessionAuth struct {
-	Auth struct {
-		AuthStart     time.Time
-		SecretStr     string //[32]byte
-		SecretCounter uint
-		Nest          interface{}
+	AuthStart     time.Time
+	SecretStr     string //[32]byte
+	SecretCounter uint
+
+	updateAuthStartTimeOnSave bool
+	authSession               `json:"-"`
+}
+
+func (s *sessionAuth) NewSessionValues() (err error) {
+	s.SecretStr, err = s.authSession.GenerateSessionKey()
+	if err != nil {
+		return
 	}
-	authStr                   string
-	UpdateAuthStartTimeOnSave bool
-	AuthTimeout               time.Duration
-	session                   session
-	nest                      interface{}
+	s.authSession.SetAuthStr(s.CalcAuth(0))
+	return s.authSession.NewSessionValues()
 }
 
-func (s *sessionAuth) AuthStr() string {
-	return s.CalcAuth(0)
-}
-
-func (s *sessionAuth) SetAuthStr(e string) {
-	s.authStr = e
-}
-
-func (s *sessionAuth) SetAuthStrTimeout(t time.Duration) {
-	s.AuthTimeout = t
-}
-
-func (s *sessionAuth) NewAuthSession() (err error) {
-	s.Auth.SecretStr, err = s.session.GenerateSessionKey()
-	return s.session.NewSession()
-}
-
-func (s *sessionAuth) LoadAuthSession() (ok bool, err error) {
-	ok, err = s.session.LoadSession()
-	if err != nil || !ok {
+func (s *sessionAuth) LoadSessionValues() (err error) {
+	err = s.authSession.LoadSessionValues()
+	if err != nil {
 		return
 	}
 
-	nested := s.session.SessionNest()
-	if v, ok := nested.(struct {
-		AuthStart     time.Time
-		SecretStr     string
-		SecretCounter uint
-		Nest          interface{}
-	}); ok {
-		s.Auth = v
-	} else {
-		return false, fmt.Errorf("unexpected type %T", nested)
+	err = s.authSession.Decode(s)
+	if err != nil {
+		return
 	}
 
-	if s.authStr == s.CalcAuth(0) {
-		if time.Now().After(s.Auth.AuthStart.Add(s.AuthTimeout)) {
-			s.Auth.SecretCounter++
-			s.UpdateAuthStartTimeOnSave = true
+	if s.authSession.AuthStr() == s.CalcAuth(0) {
+		if time.Now().After(s.AuthStart.Add(s.authSession.AuthStrTimeout())) {
+			s.SecretCounter++
+			s.updateAuthStartTimeOnSave = true
 		}
-		ok = true
-	} else if s.authStr == s.CalcAuth(-1) && time.Now().Before(s.Auth.AuthStart.Add(retryTimeout)) {
-		ok = true
+		// ok
+	} else if s.authSession.AuthStr() == s.CalcAuth(-1) && time.Now().Before(s.AuthStart.Add(retryTimeout)) {
+		// ok
 	} else {
-		return false, errors.New("invalid authentication token")
+		return errors.New("invalid authentication token")
 	}
 
+	s.authSession.SetAuthStr(s.CalcAuth(0))
 	return
 }
 
 func (s *sessionAuth) CalcAuth(mod int) string {
-	counter := int(s.Auth.SecretCounter) + mod
+	counter := int(s.SecretCounter) + mod
 	if counter < 0 {
 		counter = 0
 	}
 
-	b := sha256.Sum256([]byte(fmt.Sprintf("%s%d", s.Auth.SecretStr, counter)))
+	b := sha256.Sum256([]byte(fmt.Sprintf("%s%d", s.SecretStr, counter)))
 
 	return base64.URLEncoding.EncodeToString(b[:])
 }
 
-func (s *sessionAuth) SaveAuthSession() (err error) {
-	if s.UpdateAuthStartTimeOnSave || (s.Auth.AuthStart == time.Time{}) {
-		s.Auth.AuthStart = time.Now()
+func (s *sessionAuth) SaveSessionValues() (err error) {
+	if s.updateAuthStartTimeOnSave || (s.AuthStart == time.Time{}) {
+		s.AuthStart = time.Now()
 	}
 
-	s.session.SetSessionNest(s.Auth)
-	return s.session.SaveSession()
+	err = s.authSession.SaveSessionValues()
+	if err != nil {
+		return
+	}
+	return s.authSession.Encode(s)
 }
 
 func init() {
 	s := &sessionAuth{}
-	gob.Register(s.Auth)
+	gob.Register(s)
 }
 
 type sessionError struct {
@@ -464,6 +475,22 @@ func (s *sessionError) SetLastError(e error) {
 	s.lastErr = e
 }
 
+type sessionEncoder interface {
+	NewEncoder(w io.Writer)
+	Encode(v interface{}) error
+	FinishEncode() error
+}
+
+type sessionDecoder interface {
+	NewDecoder(r io.Reader)
+	Decode(v interface{}) error
+}
+
+type sessionCodec interface {
+	sessionEncoder
+	sessionDecoder
+}
+
 type session interface {
 	sessionExternal
 	SetKey(string)
@@ -472,14 +499,12 @@ type session interface {
 	SaveSession() error
 	NewSession() error
 	GenerateSessionKey() (string, error)
-	Decode(data []byte) (err error)
-	Encode(dataPtr *[]byte) (err error)
-	LoadSessionValues(values interface{}) (err error)
-	SaveSessionValues(valuesStore *interface{})
-	NewSessionValues()
-	SessionNest() interface{}
-	SetSessionNest(i interface{})
+	LoadSessionValues() (err error)
+	SaveSessionValues() (err error)
+	NewSessionValues() error
 	SetLastError(error)
+	SValues() map[string]interface{}
+	sessionCodec
 }
 
 type sessionHandle struct {
@@ -487,16 +512,15 @@ type sessionHandle struct {
 }
 
 type authSession interface {
-	LoadAuthSession() (bool, error)
-	SaveAuthSession() error
-	NewAuthSession() error
+	session
 	SetAuthStr(string)
 	AuthStr() string
 	SetAuthStrTimeout(time.Duration)
+	AuthStrTimeout() time.Duration
 }
 
 type authSessionHandle struct {
-	session
+	authSession
 }
 
 type sessionExternal interface {
@@ -510,7 +534,6 @@ type sessionExternal interface {
 	BoolVar(key string) (v bool)
 	StringVar(key string) (v string)
 	Var(key string) (v interface{})
-	Values() map[string]interface{}
 	Clear()
 	GetLastError() error
 	DurationSinceLastUpdate() time.Duration
@@ -525,11 +548,7 @@ type Session struct {
 func (s *Session) Save(sessionTimeout time.Duration) {
 	var err error
 	s.sessionInternal.SetSessionTimeout(sessionTimeout)
-	if v, ok := s.sessionInternal.(authSession); ok {
-		err = v.SaveAuthSession()
-	} else {
-		err = s.sessionInternal.SaveSession()
-	}
+	err = s.sessionInternal.SaveSession()
 	s.sessionInternal.SetLastError(err)
 }
 
@@ -543,15 +562,19 @@ func (s *Session) Recreate() (sessionIdToken token.Token) {
 	return token.TokenStr(key)
 }
 
+func (s *Session) Values() map[string]interface{} {
+	return s.sessionInternal.SValues()
+}
+
 func OpenSession(idToken token.Token, store store.SessionEntryStore) (sessionR *Session, sessionIdToken token.Token, err error) {
 	var handle sessionHandle
 	session := &struct {
 		*sessionData
-		sessionEncoder
+		sessionCodec
 		*sessionValues
 		*randomKey
 		*sessionError
-	}{&sessionData{session: &handle}, &sessionJSON{session: &handle}, &sessionValues{session: &handle}, &randomKey{session: &handle}, &sessionError{}}
+	}{&sessionData{session: &handle}, &sessionJSONObject{}, &sessionValues{session: &handle}, &randomKey{session: &handle}, &sessionError{}}
 	handle.session = session
 
 	session.SetKey(idToken.String())
@@ -571,35 +594,34 @@ func OpenSession(idToken token.Token, store store.SessionEntryStore) (sessionR *
 }
 
 func OpenSessionWithAuth(idToken token.Token, authToken token.Token, authTokenTimeout time.Duration, store store.SessionEntryStore) (sessionR *Session, sessionIdToken token.Token, sessionAuthToken token.Token, err error) {
-	var handle sessionHandle
+	var handle authSessionHandle
 	authSession := &struct {
 		*sessionData
-		*sessionAuth
+		*sessionAuthParam
 		*sessionValues
-		sessionEncoder
+		sessionCodec
 		*randomKey
 		*sessionError
 	}{
-		&sessionData{session: &handle},
-		&sessionAuth{session: &handle},
+		&sessionData{session: &sessionAuth{authSession: &handle}},
+		&sessionAuthParam{},
 		&sessionValues{session: &handle},
-		&sessionJSON{&authSessionJSON{&handle}},
-		//&sessionGob{session:&handle},
+		&sessionJSONObject{},
 		&randomKey{session: &handle},
 		&sessionError{},
 	}
-	handle.session = authSession
+	handle.authSession = authSession
 
 	authSession.SetKey(idToken.String())
 	authSession.SetStore(store)
 	authSession.SetAuthStr(authToken.String())
 	authSession.SetAuthStrTimeout(authTokenTimeout)
-	ok, err := authSession.LoadAuthSession()
+	ok, err := authSession.LoadSession()
 	if err != nil {
 		return
 	}
 	if !ok {
-		err = authSession.NewAuthSession()
+		err = authSession.NewSession()
 		if err != nil {
 			return
 		}
@@ -613,10 +635,10 @@ func FindSessionValuesByKey(key string, store store.SessionEntryStore) (vals map
 	session := &struct {
 		*sessionData
 		*sessionValues
-		sessionEncoder
+		sessionCodec
 		*sessionError
 		*randomKey
-	}{&sessionData{session: &handle}, &sessionValues{session: &handle}, &sessionJSON{&handle}, &sessionError{}, nil}
+	}{&sessionData{session: &handle}, &sessionValues{session: &handle}, &sessionJSONObject{}, &sessionError{}, nil}
 	handle.session = session
 
 	session.SetKey(key)
@@ -625,5 +647,5 @@ func FindSessionValuesByKey(key string, store store.SessionEntryStore) (vals map
 	if err != nil || !ok {
 		return
 	}
-	return session.Values(), true, nil
+	return session.SValues(), true, nil
 }
