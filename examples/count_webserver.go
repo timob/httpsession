@@ -26,9 +26,9 @@ func counter(resp http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		return
 	}
-	sessionArg := token.TokenStr(args.Get("session"))
+	argToken := token.TokenStr(args.Get("session"))
 
-	session, sessionToken, err := httpsession.OpenSession(sessionArg, mapStore)
+	session, sessionToken, err := httpsession.OpenSession(argToken, mapStore)
 	if err != nil {
 		return
 	}
@@ -37,7 +37,7 @@ func counter(resp http.ResponseWriter, req *http.Request) {
 		err = session.GetLastError()
 	}()
 
-	if sessionToken != sessionArg {
+	if sessionToken != argToken {
 		args.Set("session", sessionToken.String())
 		req.URL.RawQuery = args.Encode()
 		resp.Header().Set("Location", req.URL.String())
