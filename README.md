@@ -1,6 +1,7 @@
 httpsession
 ==========
-Go HTTP session library
+Go HTTP session library. Sessions consist of an id token given to client and an entry in a key-value store on the server.
+Support for authentication token which changes periodically.
 
 Documentation
 -------------

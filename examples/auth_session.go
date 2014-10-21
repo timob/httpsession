@@ -13,7 +13,7 @@ import (
 var store = mapstore.NewMapSessionStore()
 
 func userauth(resp http.ResponseWriter, req *http.Request) {
-	session, err := httpsession.OpenCookieSessionWithAuth("websession", time.Second*15, store, resp, req)
+	session, err := httpsession.OpenCookieSession("websession", store, resp, req)
 	if err != nil {
 		log.Print(err)
 		http.Error(resp, "internal error", 500)

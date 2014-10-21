@@ -20,7 +20,7 @@ func TestSessionCookie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cookie.SetToken(token)
+	cookie.SetToken(token, time.Minute)
 	session.SetVar("hello", "world")
 	session.Save(time.Minute * 10)
 	err = session.GetLastError()
@@ -42,7 +42,7 @@ func TestSessionCookie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cookie.SetToken(token)
+	cookie.SetToken(token, time.Minute)
 	v := session.StringVar("hello")
 	if v != "world" {
 		t.Fatal("expecting session map to be set")
@@ -66,8 +66,8 @@ func TestAuthSessionCookie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cookie.SetToken(token)
-	authCookie.SetToken(authToken)
+	cookie.SetToken(token, time.Minute)
+	authCookie.SetToken(authToken, time.Minute)
 	session.SetVar("hello", "world")
 	session.Save(time.Minute * 10)
 	err = session.GetLastError()
@@ -95,8 +95,8 @@ func TestAuthSessionCookie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cookie.SetToken(token)
-	authCookie.SetToken(authToken)
+	cookie.SetToken(token, time.Minute)
+	authCookie.SetToken(authToken, time.Minute)
 	v := session.StringVar("hello")
 	if v != "world" {
 		t.Fatal("expecting session map to be set")

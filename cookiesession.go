@@ -13,50 +13,41 @@ type CookieSession struct {
 	name         string
 	sessionToken token.Token
 	cookie       *sessioncookie.SessionCookie
-	*Session
+	authCookie   *sessioncookie.SessionCookie
+	authToken    token.Token
+	*AuthSession
 }
 
-type AuthCookieSession struct {
-	authCookie *sessioncookie.SessionCookie
-	authToken  token.Token
-	*CookieSession
-}
+type AuthTimeout time.Duration
+
+var DeaultAuthTimeout = AuthTimeout(time.Minute * 10)
 
 func OpenCookieSession(name string, store store.SessionEntryStore, w http.ResponseWriter, r *http.Request) (*CookieSession, error) {
-	cs := new(CookieSession)
-	cs.init(name, store, w, r)
-	s, t, err := OpenSession(cs.cookie.GetToken(), store)
-	if err != nil {
-		return nil, err
-	}
-	cs.Session = s
-	cs.sessionToken = t
-	return cs, nil
+	return DeaultAuthTimeout.OpenCookieSession(name, store, w, r)
 }
 
-func OpenCookieSessionWithAuth(name string, authenticationTimeout time.Duration, store store.SessionEntryStore, w http.ResponseWriter, r *http.Request) (*AuthCookieSession, error) {
-	cs := &AuthCookieSession{authCookie: &sessioncookie.SessionCookie{name + "_auth", w, r}, CookieSession: &CookieSession{}}
-	cs.init(name, store, w, r)
-	s, t, a, err := OpenSessionWithAuth(cs.cookie.GetToken(), cs.authCookie.GetToken(), authenticationTimeout, store)
-	if err != nil {
-		return nil, err
-	}
-	cs.Session = s
-	cs.sessionToken = t
-	cs.authToken = a
-	return cs, nil
-
-}
-
-func (c *CookieSession) init(name string, store store.SessionEntryStore, w http.ResponseWriter, r *http.Request) {
+func (a AuthTimeout) OpenCookieSession(name string, store store.SessionEntryStore, w http.ResponseWriter, r *http.Request) (*CookieSession, error) {
+	c := new(CookieSession)
 	c.name = name
 	c.store = store
 	c.cookie = &sessioncookie.SessionCookie{name + "_session", w, r}
+	c.authCookie = &sessioncookie.SessionCookie{name + "_auth", w, r}
+	s, t, at, err := OpenSessionWithAuth(c.cookie.GetToken(), c.authCookie.GetToken(), time.Duration(a), store)
+	if err != nil {
+		return nil, err
+	}
+	c.AuthSession = s
+	c.sessionToken = t
+	c.authToken = at
+	return c, nil
 }
 
 func (c *CookieSession) Save(timeout time.Duration) {
 	c.Session.Save(timeout)
-	c.cookie.SetToken(c.sessionToken)
+	if c.InGracePeriod() == false {
+		c.cookie.SetToken(c.sessionToken, timeout)
+		c.authCookie.SetToken(c.authToken, timeout)
+	}
 }
 
 func (c *CookieSession) New() {
@@ -67,14 +58,5 @@ func (c *CookieSession) New() {
 
 func (c *CookieSession) RemoveCookie() {
 	c.cookie.Remove()
-}
-
-func (a *AuthCookieSession) Save(timeout time.Duration) {
-	a.CookieSession.Save(timeout)
-	a.authCookie.SetToken(a.authToken)
-}
-
-func (a *AuthCookieSession) RemoveCookie() {
-	a.CookieSession.RemoveCookie()
-	a.authCookie.Remove()
+	c.authCookie.Remove()
 }

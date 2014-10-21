@@ -46,11 +46,6 @@ func (s *sessionData) SetSessionTimeout(t time.Duration) {
 	s.SessionTimeout = t
 }
 
-func (s *sessionData) GetSessionTimeout() (t time.Duration) {
-	t = s.SessionTimeout
-	return
-}
-
 func (s *sessionData) SetStore(e store.SessionEntryStore) {
 	s.SessionEntryStore = e
 }
@@ -374,8 +369,9 @@ func init() {
 }
 
 type sessionAuthParam struct {
-	authStr     string
-	AuthTimeout time.Duration
+	authStr       string
+	AuthTimeout   time.Duration
+	inGracePeriod bool
 }
 
 func (s *sessionAuthParam) SetAuthStr(e string) {
@@ -394,6 +390,14 @@ func (s *sessionAuthParam) AuthStrTimeout() time.Duration {
 	return s.AuthTimeout
 }
 
+func (s *sessionAuthParam) InGracePeriod() bool {
+	return s.inGracePeriod
+}
+
+func (s *sessionAuthParam) SetInGracePeriod(v bool) {
+	s.inGracePeriod = v
+}
+
 // entryInfo <-> sessionInfo
 type sessionAuth struct {
 	AuthStart     time.Time
@@ -402,6 +406,7 @@ type sessionAuth struct {
 
 	updateAuthStartTimeOnSave bool
 	authSession               `json:"-"`
+	inGracePeriod             bool
 }
 
 func (s *sessionAuth) NewSessionValues() (err error) {
@@ -431,6 +436,7 @@ func (s *sessionAuth) LoadSessionValues() (err error) {
 		}
 		// ok
 	} else if s.authSession.AuthStr() == s.CalcAuth(-1) && time.Now().Before(s.AuthStart.Add(retryTimeout)) {
+		s.authSession.SetInGracePeriod(true)
 		// ok
 	} else {
 		return errors.New("invalid authentication token")
@@ -452,11 +458,6 @@ func (s *sessionAuth) CalcAuth(mod int) string {
 }
 
 func (s *sessionAuth) SaveSessionValues() (err error) {
-	if s.authSession.GetSessionTimeout() > s.authSession.AuthStrTimeout() {
-		err = errors.New("session timeout must be less or equal to auth timeout")
-		return
-	}
-
 	if s.updateAuthStartTimeOnSave || (s.AuthStart == time.Time{}) {
 		s.AuthStart = time.Now()
 	}
@@ -466,6 +467,10 @@ func (s *sessionAuth) SaveSessionValues() (err error) {
 		return
 	}
 	return s.authSession.Encode(s)
+}
+
+func (s *sessionAuth) InGracePeriod() bool {
+	return s.inGracePeriod
 }
 
 func init() {
@@ -505,7 +510,6 @@ type session interface {
 	sessionExternal
 	SetKey(string)
 	SetSessionTimeout(time.Duration)
-	GetSessionTimeout() time.Duration
 	LoadSession() (bool, error)
 	SaveSession() error
 	NewSession() error
@@ -524,10 +528,16 @@ type sessionHandle struct {
 
 type authSession interface {
 	session
+	authSessionExternal
 	SetAuthStr(string)
 	AuthStr() string
 	SetAuthStrTimeout(time.Duration)
 	AuthStrTimeout() time.Duration
+	SetInGracePeriod(bool)
+}
+
+type authSessionExternal interface {
+	InGracePeriod() bool
 }
 
 type authSessionHandle struct {
@@ -577,6 +587,11 @@ func (s *Session) Values() map[string]interface{} {
 	return s.sessionInternal.SValues()
 }
 
+type AuthSession struct {
+	*Session
+	authSessionExternal
+}
+
 func OpenSession(idToken token.Token, store store.SessionEntryStore) (sessionR *Session, sessionIdToken token.Token, err error) {
 	var handle sessionHandle
 	session := &struct {
@@ -604,7 +619,7 @@ func OpenSession(idToken token.Token, store store.SessionEntryStore) (sessionR *
 	return &Session{session, session}, token.TokenStr(session.Key()), nil
 }
 
-func OpenSessionWithAuth(idToken token.Token, authToken token.Token, authTokenTimeout time.Duration, store store.SessionEntryStore) (sessionR *Session, sessionIdToken token.Token, sessionAuthToken token.Token, err error) {
+func OpenSessionWithAuth(idToken token.Token, authToken token.Token, authTokenTimeout time.Duration, store store.SessionEntryStore) (sessionR *AuthSession, sessionIdToken token.Token, sessionAuthToken token.Token, err error) {
 	var handle authSessionHandle
 	authSession := &struct {
 		*sessionData
@@ -638,7 +653,7 @@ func OpenSessionWithAuth(idToken token.Token, authToken token.Token, authTokenTi
 		}
 	}
 
-	return &Session{authSession, authSession}, token.TokenStr(authSession.Key()), token.TokenStr(authSession.AuthStr()), nil
+	return &AuthSession{&Session{authSession, authSession}, authSession}, token.TokenStr(authSession.Key()), token.TokenStr(authSession.AuthStr()), nil
 }
 
 func FindSessionValuesByKey(key string, store store.SessionEntryStore) (vals map[string]interface{}, ok bool, err error) {
