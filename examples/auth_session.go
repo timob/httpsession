@@ -10,13 +10,27 @@ import (
 	"time"
 )
 
-func userauth(resp http.ResponseWriter, req *http.Request, session *httpsession.CookieSession) {
+var store = mapstore.NewMapSessionStore()
+
+func userauth(resp http.ResponseWriter, req *http.Request) {
+	session, err := httpsession.OpenCookieSessionWithAuth("websession", time.Second*15, store, resp, req)
+	if err != nil {
+		log.Print(err)
+		http.Error(resp, "internal error", 500)
+		return
+	}
 	if req.URL.Path == "/login" {
 		if req.PostFormValue("password") == "secret" {
 			session.SetVar("login", true)
 		}
 	} else if req.URL.Path == "/logout" {
 		session.New()
+	}
+	session.Save(time.Second * 15)
+	if err = session.GetLastError(); err != nil {
+		log.Print(err)
+		http.Error(resp, "internal error", 500)
+		return
 	}
 
 	if session.BoolVar("login") {
@@ -37,9 +51,7 @@ func main() {
 	port := flag.String("port", "7879", "port")
 	flag.Parse()
 
-	sessionServer := &httpsession.SessionServer{Name: "websess", Store: mapstore.NewMapSessionStore(), AuthTokenTimeout: time.Second * 15}
-
-	http.Handle("/", sessionServer.Handle(httpsession.HandlerFunc(userauth)))
+	http.Handle("/", http.HandlerFunc(userauth))
 	err := http.ListenAndServe(":"+*port, nil)
 	if err != nil {
 		log.Fatal(err)

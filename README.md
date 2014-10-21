@@ -17,18 +17,21 @@ import (
 	"github.com/timob/httpsession/store/mapstore"
 	"log"
 	"net/http"
+	"time"
 )
 
-func main() {
-	sessionServer := &httpsession.SessionServer{Name: "websess", Store: mapstore.NewMapSessionStore()}
+var store = mapstore.NewMapSessionStore()
 
-	http.Handle("/", sessionServer.Handle(httpsession.HandlerFunc(
-		func(resp http.ResponseWriter, req *http.Request, session *httpsession.CookieSession) {
+func main() {
+	http.Handle("/", http.HandlerFunc(
+		func(resp http.ResponseWriter, req *http.Request) {
+			session, _ := httpsession.OpenCookieSession("websess", store, resp, req)
 			counter := session.IntVar("counter")
-			fmt.Fprintf(resp, "counter = %d", counter)
 			session.SetVar("counter", counter+1)
+			session.Save(time.Minute)
+			fmt.Fprintf(resp, "counter = %d", counter)
 		},
-	)))
+	))
 
 	err := http.ListenAndServe(":7878", nil)
 	if err != nil {

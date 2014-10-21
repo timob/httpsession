@@ -2,83 +2,79 @@ package httpsession
 
 import (
 	"github.com/timob/httpsession/store"
+	"github.com/timob/httpsession/token"
 	"github.com/timob/httpsession/token/sessioncookie"
-	"log"
 	"net/http"
 	"time"
 )
 
 type CookieSession struct {
-	*sessioncookie.SessionCookie
+	store        store.SessionEntryStore
+	name         string
+	sessionToken token.Token
+	cookie       *sessioncookie.SessionCookie
 	*Session
-	saved bool
+}
+
+type AuthCookieSession struct {
+	authCookie *sessioncookie.SessionCookie
+	authToken  token.Token
+	*CookieSession
+}
+
+func OpenCookieSession(name string, store store.SessionEntryStore, w http.ResponseWriter, r *http.Request) (*CookieSession, error) {
+	cs := new(CookieSession)
+	cs.init(name, store, w, r)
+	s, t, err := OpenSession(cs.cookie.GetToken(), store)
+	if err != nil {
+		return nil, err
+	}
+	cs.Session = s
+	cs.sessionToken = t
+	return cs, nil
+}
+
+func OpenCookieSessionWithAuth(name string, authenticationTimeout time.Duration, store store.SessionEntryStore, w http.ResponseWriter, r *http.Request) (*AuthCookieSession, error) {
+	cs := &AuthCookieSession{authCookie: &sessioncookie.SessionCookie{name + "_auth", w, r}, CookieSession: &CookieSession{}}
+	cs.init(name, store, w, r)
+	s, t, a, err := OpenSessionWithAuth(cs.cookie.GetToken(), cs.authCookie.GetToken(), authenticationTimeout, store)
+	if err != nil {
+		return nil, err
+	}
+	cs.Session = s
+	cs.sessionToken = t
+	cs.authToken = a
+	return cs, nil
+
+}
+
+func (c *CookieSession) init(name string, store store.SessionEntryStore, w http.ResponseWriter, r *http.Request) {
+	c.name = name
+	c.store = store
+	c.cookie = &sessioncookie.SessionCookie{name + "_session", w, r}
 }
 
 func (c *CookieSession) Save(timeout time.Duration) {
 	c.Session.Save(timeout)
-	c.saved = true
+	c.cookie.SetToken(c.sessionToken)
 }
 
 func (c *CookieSession) New() {
+	c.Session.Save(0)
 	c.Session.Clear()
-	token := c.Session.Recreate()
-	c.SessionCookie.SetToken(token)
+	c.sessionToken = c.Session.Recreate()
 }
 
-// HTTP handler with *Session
-type Handler interface {
-	ServeHTTP(http.ResponseWriter, *http.Request, *CookieSession)
+func (c *CookieSession) RemoveCookie() {
+	c.cookie.Remove()
 }
 
-// Function to be used as Handler
-type HandlerFunc func(http.ResponseWriter, *http.Request, *CookieSession)
-
-//Calls h(w, r, s)
-func (h HandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request, c *CookieSession) {
-	h(w, r, c)
+func (a *AuthCookieSession) Save(timeout time.Duration) {
+	a.CookieSession.Save(timeout)
+	a.authCookie.SetToken(a.authToken)
 }
 
-// Server to serve Handlers.
-type SessionServer struct {
-	Name             string
-	Store            store.SessionEntryStore
-	AuthTokenTimeout time.Duration
-}
-
-// Specify a Handler h for the SessionServer. h does not need to call Save()
-// on the *Session.
-func (s *SessionServer) Handle(h Handler) http.Handler {
-	if s.AuthTokenTimeout == 0 {
-		s.AuthTokenTimeout = time.Minute * 30
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-		defer func() {
-			if err != nil {
-				log.Print(err)
-				http.Error(w, "error", 500)
-			}
-		}()
-
-		cookie := &sessioncookie.SessionCookie{s.Name + "_session", w, r}
-		authCookie := &sessioncookie.SessionCookie{s.Name + "_auth", w, r}
-
-		session, token, authToken, err := OpenSessionWithAuth(cookie.GetToken(), authCookie.GetToken(), s.AuthTokenTimeout, s.Store)
-		if err != nil {
-			return
-		}
-		if token != cookie.GetToken() {
-			cookie.SetToken(token)
-		}
-		if authToken != authCookie.GetToken() {
-			authCookie.SetToken(authToken)
-		}
-
-		cs := &CookieSession{cookie, session, false}
-		h.ServeHTTP(w, r, cs)
-		if cs.saved == false {
-			session.Save(time.Minute * 30)
-			err = session.GetLastError()
-		}
-	})
+func (a *AuthCookieSession) RemoveCookie() {
+	a.CookieSession.RemoveCookie()
+	a.authCookie.Remove()
 }

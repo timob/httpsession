@@ -46,6 +46,11 @@ func (s *sessionData) SetSessionTimeout(t time.Duration) {
 	s.SessionTimeout = t
 }
 
+func (s *sessionData) GetSessionTimeout() (t time.Duration) {
+	t = s.SessionTimeout
+	return
+}
+
 func (s *sessionData) SetStore(e store.SessionEntryStore) {
 	s.SessionEntryStore = e
 }
@@ -447,6 +452,11 @@ func (s *sessionAuth) CalcAuth(mod int) string {
 }
 
 func (s *sessionAuth) SaveSessionValues() (err error) {
+	if s.authSession.GetSessionTimeout() > s.authSession.AuthStrTimeout() {
+		err = errors.New("session timeout must be less or equal to auth timeout")
+		return
+	}
+
 	if s.updateAuthStartTimeOnSave || (s.AuthStart == time.Time{}) {
 		s.AuthStart = time.Now()
 	}
@@ -495,6 +505,7 @@ type session interface {
 	sessionExternal
 	SetKey(string)
 	SetSessionTimeout(time.Duration)
+	GetSessionTimeout() time.Duration
 	LoadSession() (bool, error)
 	SaveSession() error
 	NewSession() error
